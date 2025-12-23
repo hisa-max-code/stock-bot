@@ -19,8 +19,17 @@ def get_ai_analysis(symbol, diff, price):
     prompt = f"銘柄{symbol}が前日比{diff:.2f}%の{price}円になりました。投資家目線で、この動きに対する短いコメントを1行（30文字以内）で書いてください。"
     try:
         response = model.generate_content(prompt)
-        return response.text.strip()
-    except:
+        
+        # 安全性フィルターなどで回答が空の場合のチェック
+        if response.parts:
+            return response.text.strip()
+        else:
+            print(f"AI警告: {symbol} の回答が空でした（安全性フィルターの可能性があります）")
+            return "分析不可"
+            
+    except Exception as e:
+        # ここが重要！エラーの正体をログに出力します
+        print(f"AI通信エラー詳細 ({symbol}): {e}")
         return "分析エラー"
 
 def check_stock(symbol):
@@ -72,3 +81,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
