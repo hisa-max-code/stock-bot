@@ -16,10 +16,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11' # 最新のAIライブラリに最適なバージョン
+          python-version: '3.11' # 安定した最新版を使用
 
       - name: Install dependencies
         run: |
+          # 確実に最新版のAIライブラリをインストールします
+          pip install --upgrade pip
           pip install --upgrade yfinance requests google-generativeai
 
       - name: Run script
