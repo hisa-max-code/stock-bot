@@ -19,10 +19,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+     - name: Install dependencies
         run: |
-          # ここに AI用のライブラリ (google-generativeai) を追加しました
-          pip install yfinance requests google-generativeai
+          # --upgrade を付けて、最新のライブラリを強制的に使うようにします
+          pip install --upgrade yfinance requests google-generativeai
 
       - name: Run script
         env:
