@@ -7,27 +7,26 @@ import google.generativeai as genai
 WEBHOOK_URL = os.getenv("MY_DISCORD_URL")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 
-# --- 2. AIの設定（404エラー対策済み） ---
+# --- 2. AIの設定（404エラー対策） ---
 genai.configure(api_key=GEMINI_KEY)
-# 'model_name=' を抜いて直接指定することで、最新の安定版に接続します
-model = genai.GenerativeModel('gemini-1.5-flash')
+
+# 'gemini-1.5-flash' ではなく 'models/gemini-1.5-flash' と明示するのが最新の正解です
+model = genai.GenerativeModel('models/gemini-1.5-flash')
 
 WATCH_LIST = ["NVDA", "MSFT", "6857.T", "6701.T", "7974.T"]
 ALERT_THRESHOLD = 0.1 
 
 def get_ai_analysis(symbol, diff, price):
     """AIに株価の動きを分析してもらう"""
-    prompt = f"銘柄{symbol}が前日比{diff:.2f}%の{price:,.1f}円になりました。投資家目線で、この動きに対する短いコメントを1行（30文字以内）で書いてください。"
+    prompt = f"銘柄{symbol}が前日比{diff:.2f}%の{price:,.1f}円になりました。この動きに対する短いコメントを1行（30文字以内）で書いてください。"
     try:
-        # 確実に内容を渡すため contents= を指定
-        response = model.generate_content(contents=prompt)
-        if response.text:
-            return response.text.strip()
-        return "分析データを生成できませんでした"
+        # 通信エラーを避けるための最新の書き方
+        response = model.generate_content(prompt)
+        return response.text.strip()
     except Exception as e:
-        # エラーが出た場合はログに詳細を記録
-        print(f"AI通信エラー詳細 ({symbol}): {e}")
-        return "分析エラー（API設定を確認してください）"
+        # 通信失敗時はログにエラー内容を出して、分析エラーと返す
+        print(f"DEBUG: {symbol} 分析失敗: {e}")
+        return "分析データを取得できませんでした"
 
 def check_stock(symbol):
     stock = yf.Ticker(symbol)
@@ -43,7 +42,6 @@ def check_stock(symbol):
     
     diff = ((current_price - prev_close) / prev_close) * 100
     
-    # 0.1%以上の変動があった場合のみ処理
     if abs(diff) < ALERT_THRESHOLD: return None
 
     # AI分析の実行
@@ -61,9 +59,8 @@ def check_stock(symbol):
             {"name": "現在値", "value": f"**{current_price:,.1f}円**", "inline": True},
             {"name": "前日比", "value": f"**{diff:+.2f}%**", "inline": True},
             {"name": "🤖 AIミニ分析", "value": f"```{ai_comment}```", "inline": False},
-            {"name": "本日の高値", "value": f"{high_price:,.1f}円", "inline": True},
-            {"name": "本日の安値", "value": f"{low_price:,.1f}円", "inline": True},
-            {"name": "出来高", "value": f"{volume:,.0f} 株", "inline": True}
+            {"name": "高値/安値", "value": f"{high_price:,.1f} / {low_price:,.1f}", "inline": True},
+            {"name": "出来高", "value": f"{volume:,.0f}", "inline": True}
         ],
         "footer": {"text": f"取得時刻: {latest.name.strftime('%Y-%m-%d %H:%M')}"}
     }
@@ -71,7 +68,7 @@ def check_stock(symbol):
 
 def main():
     if not WEBHOOK_URL or not GEMINI_KEY:
-        print("設定エラー: 環境変数が足りません")
+        print("設定エラー: APIキーがありません")
         return
     
     embeds = []
