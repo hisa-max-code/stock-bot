@@ -2,39 +2,49 @@ import os
 import yfinance as yf
 import requests
 
-# 【重要】GitHub Actionsを使う場合は、URLを直接書かずにSecretsから読み込みます
-# もし自分のPC(Cursor)でテストしたい場合は、ここを "https://..." と囲って書いてください
+# 1. 秘密のURL（GitHubから読み込む用）
 WEBHOOK_URL = os.getenv("MY_DISCORD_URL")
 
-STOCK_CODE = "7203.T" 
+# 2. 監視したい銘柄のリスト（好きなだけ増やせます！）
+# 日本株は「コード.T」、米国株はそのまま（例: AAPL）書きます
+WATCH_LIST = ["7203.T", "7974.T", "9984.T", "AAPL", "TSLA"]
 
-def main():
-    # URLが設定されていない場合のエラー回避
-    if not WEBHOOK_URL:
-        print("エラー: MY_DISCORD_URL が設定されていません。")
-        return
-
-    stock = yf.Ticker(STOCK_CODE)
+def check_stock(symbol):
+    """特定の1銘柄をチェックして、必要ならDiscordに送る関数"""
+    stock = yf.Ticker(symbol)
     data = stock.history(period="2d")
     
     if len(data) < 2:
-        print("エラー: 株価データが取得できませんでした。")
-        return
+        return f"【{symbol}】データ取得失敗"
 
     latest_price = data['Close'].iloc[-1]
     old_price = data['Close'].iloc[-2]
     diff = ((latest_price - old_price) / old_price) * 100
     
-    # テストのために条件を外して必ず送るようにします
-    message = f"【自動チェック成功】\n銘柄: {STOCK_CODE}\n現在値: {latest_price:,.1f}円\n前日比: {diff:+.2f}%"
+    # メッセージの作成
+    # 変化率がプラスなら「▲」、マイナスなら「▼」を表示する工夫
+    mark = "▲" if diff > 0 else "▼"
+    return f"【{symbol}】 {latest_price:,.1f}円 ({mark}{abs(diff):.2f}%)"
+
+def main():
+    if not WEBHOOK_URL:
+        print("エラー: URLが設定されていません")
+        return
+
+    results = []
+    # 3. リストの中身を1つずつループで処理
+    for symbol in WATCH_LIST:
+        print(f"{symbol} をチェック中...")
+        result_text = check_stock(symbol)
+        results.append(result_text) # 結果を溜める
     
-    payload = {"content": message}
-    response = requests.post(WEBHOOK_URL, json=payload)
+    # 4. 全銘柄の結果を1つのメッセージにまとめて送信
+    final_message = "📢 **本日の株価一斉チェック**\n" + "\n".join(results)
     
-    if response.status_code == 204:
-        print("Discordへの送信に成功しました！")
-    else:
-        print(f"Discordへの送信に失敗しました。ステータスコード: {response.status_code}")
+    payload = {"content": final_message}
+    requests.post(WEBHOOK_URL, json=payload)
+    print("一括送信が完了しました！")
 
 if __name__ == "__main__":
     main()
+
