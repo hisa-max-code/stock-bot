@@ -7,25 +7,36 @@ import google.generativeai as genai
 WEBHOOK_URL = os.getenv("MY_DISCORD_URL")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 
-# --- 2. AIの設定（404エラー対策） ---
+# --- 2. AIの設定（最新の呼び出し方式） ---
 genai.configure(api_key=GEMINI_KEY)
 
-# 'gemini-1.5-flash' ではなく 'models/gemini-1.5-flash' と明示するのが最新の正解です
-model = genai.GenerativeModel('models/gemini-1.5-flash')
+# モデル名を 'gemini-1.5-flash' に戻し、エラー時の詳細をより詳しく出します
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 WATCH_LIST = ["NVDA", "MSFT", "6857.T", "6701.T", "7974.T"]
 ALERT_THRESHOLD = 0.1 
 
 def get_ai_analysis(symbol, diff, price):
     """AIに株価の動きを分析してもらう"""
-    prompt = f"銘柄{symbol}が前日比{diff:.2f}%の{price:,.1f}円になりました。この動きに対する短いコメントを1行（30文字以内）で書いてください。"
+    prompt = f"銘柄{symbol}が前日比{diff:.2f}%の{price:,.1f}円になりました。投資家目線で、この動きに対する短いコメントを1行（30文字以内）で書いてください。"
     try:
-        # 通信エラーを避けるための最新の書き方
-        response = model.generate_content(prompt)
-        return response.text.strip()
+        # 安全性設定を一番甘くして、AIが拒否しないようにします
+        response = model.generate_content(
+            prompt,
+            safety_settings=[
+                {"category": "HATE_SPEECH", "threshold": "BLOCK_NONE"},
+                {"category": "HARASSMENT", "threshold": "BLOCK_NONE"},
+                {"category": "SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
+                {"category": "DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+            ]
+        )
+        if response.text:
+            return response.text.strip()
+        return "分析データが生成されませんでした"
     except Exception as e:
-        # 通信失敗時はログにエラー内容を出して、分析エラーと返す
-        print(f"DEBUG: {symbol} 分析失敗: {e}")
+        # ここで表示されるエラー内容が解決の最大のヒントになります
+        print(f"--- 重要：AIエラー詳細 ({symbol}) ---")
+        print(e)
         return "分析データを取得できませんでした"
 
 def check_stock(symbol):
@@ -68,8 +79,11 @@ def check_stock(symbol):
 
 def main():
     if not WEBHOOK_URL or not GEMINI_KEY:
-        print("設定エラー: APIキーがありません")
+        print("設定エラー: 環境変数が足りません")
         return
+    
+    # 【診断用】APIキーが正しく読み込めているか最初の数文字だけ表示
+    print(f"DEBUG: APIキーの状態: {GEMINI_KEY[:4]}... (全{len(GEMINI_KEY)}文字)")
     
     embeds = []
     for symbol in WATCH_LIST:
