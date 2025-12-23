@@ -2,55 +2,65 @@ import os
 import yfinance as yf
 import requests
 
-# 1. 秘密のURL
 WEBHOOK_URL = os.getenv("MY_DISCORD_URL")
-
-# 2. 監視銘柄リスト
-WATCH_LIST = ["NVDA", "MSFT", "6857.T", "6701.T"]
-
-# 3. 【ここが重要】通知する条件（％）
-# 2.0に設定すると、±2%以上の変動があった時だけ通知します
-ALERT_THRESHOLD = 2.0
+# 監視銘柄（AI関連 + 以前のもの）
+WATCH_LIST = ["NVDA", "MSFT", "6857.T", "6701.T", "7974.T"]
+ALERT_THRESHOLD = 0.1 # テスト用に低めに設定
 
 def check_stock(symbol):
     stock = yf.Ticker(symbol)
     data = stock.history(period="2d")
-    
-    if len(data) < 2:
-        return None
+    if len(data) < 2: return None
 
     latest_price = data['Close'].iloc[-1]
     old_price = data['Close'].iloc[-2]
     diff = ((latest_price - old_price) / old_price) * 100
     
-    # 【判定】絶対値(abs)がしきい値より小さい場合は、何も返さない（無視する）
-    if abs(diff) < ALERT_THRESHOLD:
-        return None
-    
+    if abs(diff) < ALERT_THRESHOLD: return None
+
+    # --- リッチ化ポイント：色の設定 ---
+    # 16進数のカラーコードを整数に変換（緑: 3066993, 赤: 15158332）
+    color = 3066993 if diff > 0 else 15158332
     mark = "🚀 急騰" if diff > 0 else "📉 急落"
-    return f"{mark} 【{symbol}】 {latest_price:,.1f}円 ({diff:+.2f}%)"
+    
+    # --- リッチ化ポイント：Yahoo!ファイナンスへのリンク作成 ---
+    # 日本株(末尾.T)と米国株でURLを分ける
+    if ".T" in symbol:
+        url = f"https://finance.yahoo.co.jp/quote/{symbol.replace('.T', '')}"
+    else:
+        url = f"https://finance.yahoo.com/quote/{symbol}"
+
+    # Discordの「Embed」形式のデータを作成
+    embed = {
+        "title": f"{mark} {symbol}",
+        "url": url,
+        "color": color,
+        "fields": [
+            {"name": "現在値", "value": f"{latest_price:,.1f}円", "inline": True},
+            {"name": "前日比", "value": f"{diff:+.2f}%", "inline": True}
+        ],
+        "footer": {"text": "Yahoo! Financeデータ"}
+    }
+    return embed
 
 def main():
-    if not WEBHOOK_URL:
-        print("エラー: URLが設定されていません")
-        return
+    if not WEBHOOK_URL: return
 
-    results = []
+    embeds = []
     for symbol in WATCH_LIST:
         print(f"{symbol} をチェック中...")
-        result_text = check_stock(symbol)
-        if result_text: # 値動きがあった場合だけリストに追加
-            results.append(result_text)
+        embed_data = check_stock(symbol)
+        if embed_data:
+            embeds.append(embed_data)
     
-    # 4. 大きく動いた銘柄がある場合のみDiscordに送る
-    if results:
-        final_message = "⚠️ **株価アラート（大幅な値動きを検知）**\n" + "\n".join(results)
-        payload = {"content": final_message}
+    if embeds:
+        # Discordに「embeds」として送信
+        payload = {
+            "content": "⚠️ **株価急変アラート**",
+            "embeds": embeds
+        }
         requests.post(WEBHOOK_URL, json=payload)
-        print(f"{len(results)} 件の急変を通知しました。")
-    else:
-        # 動いた銘柄がゼロなら、Discordには送らずログだけ残す
-        print("大きな値動きはありませんでした。")
+        print("リッチな通知を送信しました！")
 
 if __name__ == "__main__":
     main()
