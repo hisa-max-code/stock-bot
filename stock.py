@@ -3,36 +3,30 @@ import yfinance as yf
 import requests
 import google.generativeai as genai
 
-# 設定の読み込み
+# --- 設定の読み込み ---
 WEBHOOK_URL = os.getenv("MY_DISCORD_URL")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 
-# AIの設定
+# AIの設定（最新のGemini 1.5 Flashを使用）
 genai.configure(api_key=GEMINI_KEY)
-# 10行目付近：モデル名を最新の安定版指定に変更します
-# もしこれでもダメな場合は "gemini-1.5-pro" に変えてみてください
 model = genai.GenerativeModel(model_name='gemini-1.5-flash')
 
-# ---
-# get_ai_analysis 関数の中のプロンプトを少し調整
+# 監視銘柄
+WATCH_LIST = ["NVDA", "MSFT", "6857.T", "6701.T", "7974.T"]
+ALERT_THRESHOLD = 0.1  # テスト用に0.1%に設定しています
+
 def get_ai_analysis(symbol, diff, price):
-    # (省略)
+    """AIに株価の動きを分析してもらう"""
+    prompt = f"銘柄{symbol}が前日比{diff:.2f}%の{price:,.1f}円になりました。投資家目線で、この動きに対する短いコメントを1行（30文字以内）で書いてください。"
     try:
-        # 安全のために、引数名を明示して呼び出します
+        # contents引数を明示的に指定して404エラーを回避
         response = model.generate_content(contents=prompt)
-        # (以下同じ)
-        
-        # 安全性フィルターなどで回答が空の場合のチェック
-        if response.parts:
+        if response.text:
             return response.text.strip()
-        else:
-            print(f"AI警告: {symbol} の回答が空でした（安全性フィルターの可能性があります）")
-            return "分析不可"
-            
+        return "分析データを生成できませんでした"
     except Exception as e:
-        # ここが重要！エラーの正体をログに出力します
         print(f"AI通信エラー詳細 ({symbol}): {e}")
-        return "分析エラー"
+        return "分析エラー（API設定を確認してください）"
 
 def check_stock(symbol):
     stock = yf.Ticker(symbol)
@@ -42,11 +36,16 @@ def check_stock(symbol):
     latest = data.iloc[-1]
     prev_close = data['Close'].iloc[-2]
     current_price = latest['Close']
+    high_price = latest['High']
+    low_price = latest['Low']
+    volume = latest['Volume']
+    
     diff = ((current_price - prev_close) / prev_close) * 100
     
+    # 判定（絶対値がしきい値を超えた場合のみ通知）
     if abs(diff) < ALERT_THRESHOLD: return None
 
-    # --- AIミニ分析の実行 ---
+    # AI分析の実行
     ai_comment = get_ai_analysis(symbol, diff, current_price)
 
     color = 3066993 if diff > 0 else 15158332
@@ -60,7 +59,10 @@ def check_stock(symbol):
         "fields": [
             {"name": "現在値", "value": f"**{current_price:,.1f}円**", "inline": True},
             {"name": "前日比", "value": f"**{diff:+.2f}%**", "inline": True},
-            {"name": "🤖 AIミニ分析", "value": ai_comment, "inline": False} # AIのコメントを追加
+            {"name": "🤖 AIミニ分析", "value": f"```{ai_comment}```", "inline": False},
+            {"name": "本日の高値", "value": f"{high_price:,.1f}円", "inline": True},
+            {"name": "本日の安値", "value": f"{low_price:,.1f}円", "inline": True},
+            {"name": "出来高", "value": f"{volume:,.0f} 株", "inline": True}
         ],
         "footer": {"text": f"取得時刻: {latest.name.strftime('%Y-%m-%d %H:%M')}"}
     }
@@ -68,7 +70,7 @@ def check_stock(symbol):
 
 def main():
     if not WEBHOOK_URL or not GEMINI_KEY:
-        print("設定エラー: APIキーが足りません")
+        print("設定エラー: 環境変数が足りません")
         return
     
     embeds = []
@@ -78,10 +80,11 @@ def main():
         if embed_data: embeds.append(embed_data)
     
     if embeds:
-        payload = {"content": "⚠️ **【AI分析付】株価リアルタイム監視**", "embeds": embeds}
+        payload = {"content": "⚠️ **【AI分析付】株価リアルタイム監視報告**", "embeds": embeds}
         requests.post(WEBHOOK_URL, json=payload)
+        print("通知を送信しました。")
+    else:
+        print("通知対象の大きな値動きはありませんでした。")
 
 if __name__ == "__main__":
     main()
-
-
