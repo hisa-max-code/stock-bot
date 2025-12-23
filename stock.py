@@ -8,6 +8,8 @@ WEBHOOK_URL = os.getenv("MY_DISCORD_URL")
 # 【設定】ここを書き換えます
 WEBHOOK_URL = "https://discordapp.com/api/webhooks/1452668737043038229/5bGWK0eFl8DCADXIHbmVRF3NX1WDpaa6WlRW_lJz-yBOpDzazlynEiGIPrDSWOUnIEnO"
 STOCK_CODE = "7203.T"  # トヨタ自動車の場合。米国株なら "AAPL" など
+# 修正: 2日前と前日の株価を使い、もしいずれかが0やNaNならエラーハンドリングする
+# また、最新の株価取得時に例外が出たら通知する
 
 def main():
     # 1. 株の情報を取ってくる
