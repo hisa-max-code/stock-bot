@@ -9,16 +9,18 @@ GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 
 # AIの設定
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+# 10行目付近：モデル名を最新の安定版指定に変更します
+# もしこれでもダメな場合は "gemini-1.5-pro" に変えてみてください
+model = genai.GenerativeModel(model_name='gemini-1.5-flash')
 
-WATCH_LIST = ["NVDA", "MSFT", "6857.T", "6701.T", "7974.T"]
-ALERT_THRESHOLD = 0.1
-
+# ---
+# get_ai_analysis 関数の中のプロンプトを少し調整
 def get_ai_analysis(symbol, diff, price):
-    """AIに株価の動きを1行で分析してもらう"""
-    prompt = f"銘柄{symbol}が前日比{diff:.2f}%の{price}円になりました。投資家目線で、この動きに対する短いコメントを1行（30文字以内）で書いてください。"
+    # (省略)
     try:
-        response = model.generate_content(prompt)
+        # 安全のために、引数名を明示して呼び出します
+        response = model.generate_content(contents=prompt)
+        # (以下同じ)
         
         # 安全性フィルターなどで回答が空の場合のチェック
         if response.parts:
@@ -81,4 +83,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
