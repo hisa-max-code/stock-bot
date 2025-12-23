@@ -7,7 +7,7 @@ WEBHOOK_URL = os.getenv("MY_DISCORD_URL")
 
 # 2. 監視したい銘柄のリスト（好きなだけ増やせます！）
 # 日本株は「コード.T」、米国株はそのまま（例: AAPL）書きます
-WATCH_LIST = ["7203.T", "7974.T", "9984.T", "AAPL", "TSLA"]
+WATCH_LIST = ["7203.T", "7974.T", "9984.T", "AAPL", "TSLA", "NVDA", "MSFT", "6857.T", "6701.T"]
 
 def check_stock(symbol):
     """特定の1銘柄をチェックして、必要ならDiscordに送る関数"""
@@ -47,4 +47,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
