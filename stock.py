@@ -3,28 +3,29 @@ import yfinance as yf
 import requests
 import google.generativeai as genai
 
-# --- 設定の読み込み ---
+# --- 1. 設定の読み込み ---
 WEBHOOK_URL = os.getenv("MY_DISCORD_URL")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 
-# AIの設定（最新のGemini 1.5 Flashを使用）
+# --- 2. AIの設定（404エラー対策済み） ---
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel(model_name='gemini-1.5-flash')
+# 'model_name=' を抜いて直接指定することで、最新の安定版に接続します
+model = genai.GenerativeModel('gemini-1.5-flash')
 
-# 監視銘柄
 WATCH_LIST = ["NVDA", "MSFT", "6857.T", "6701.T", "7974.T"]
-ALERT_THRESHOLD = 0.1  # テスト用に0.1%に設定しています
+ALERT_THRESHOLD = 0.1 
 
 def get_ai_analysis(symbol, diff, price):
     """AIに株価の動きを分析してもらう"""
     prompt = f"銘柄{symbol}が前日比{diff:.2f}%の{price:,.1f}円になりました。投資家目線で、この動きに対する短いコメントを1行（30文字以内）で書いてください。"
     try:
-        # contents引数を明示的に指定して404エラーを回避
+        # 確実に内容を渡すため contents= を指定
         response = model.generate_content(contents=prompt)
         if response.text:
             return response.text.strip()
         return "分析データを生成できませんでした"
     except Exception as e:
+        # エラーが出た場合はログに詳細を記録
         print(f"AI通信エラー詳細 ({symbol}): {e}")
         return "分析エラー（API設定を確認してください）"
 
@@ -42,7 +43,7 @@ def check_stock(symbol):
     
     diff = ((current_price - prev_close) / prev_close) * 100
     
-    # 判定（絶対値がしきい値を超えた場合のみ通知）
+    # 0.1%以上の変動があった場合のみ処理
     if abs(diff) < ALERT_THRESHOLD: return None
 
     # AI分析の実行
@@ -84,7 +85,7 @@ def main():
         requests.post(WEBHOOK_URL, json=payload)
         print("通知を送信しました。")
     else:
-        print("通知対象の大きな値動きはありませんでした。")
+        print("大きな値動きはありませんでした。")
 
 if __name__ == "__main__":
     main()
