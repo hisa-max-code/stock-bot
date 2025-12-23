@@ -1,35 +1,47 @@
 import os
 import yfinance as yf
 import requests
+import google.generativeai as genai
 
+# 設定の読み込み
 WEBHOOK_URL = os.getenv("MY_DISCORD_URL")
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+
+# AIの設定
+genai.configure(api_key=GEMINI_KEY)
+model = genai.GenerativeModel('gemini-1.5-flash')
+
 WATCH_LIST = ["NVDA", "MSFT", "6857.T", "6701.T", "7974.T"]
-ALERT_THRESHOLD = 0.1 # テスト用
+ALERT_THRESHOLD = 0.1
+
+def get_ai_analysis(symbol, diff, price):
+    """AIに株価の動きを1行で分析してもらう"""
+    prompt = f"銘柄{symbol}が前日比{diff:.2f}%の{price}円になりました。投資家目線で、この動きに対する短いコメントを1行（30文字以内）で書いてください。"
+    try:
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except:
+        return "分析エラー"
 
 def check_stock(symbol):
     stock = yf.Ticker(symbol)
     data = stock.history(period="2d")
     if len(data) < 2: return None
 
-    # 最新データと前日データの取得
     latest = data.iloc[-1]
     prev_close = data['Close'].iloc[-2]
-    
     current_price = latest['Close']
-    high_price = latest['High']
-    low_price = latest['Low']
-    volume = latest['Volume'] # 出来高（取引された株の数）
-    
     diff = ((current_price - prev_close) / prev_close) * 100
+    
     if abs(diff) < ALERT_THRESHOLD: return None
+
+    # --- AIミニ分析の実行 ---
+    ai_comment = get_ai_analysis(symbol, diff, current_price)
 
     color = 3066993 if diff > 0 else 15158332
     mark = "🚀 急騰" if diff > 0 else "📉 急落"
-    
-    # リンク作成
     url = f"https://finance.yahoo.co.jp/quote/{symbol.replace('.T', '')}" if ".T" in symbol else f"https://finance.yahoo.com/quote/{symbol}"
 
-    # --- リッチ化ポイント：より詳細な情報の追加 ---
     embed = {
         "title": f"{mark} {symbol}",
         "url": url,
@@ -37,17 +49,17 @@ def check_stock(symbol):
         "fields": [
             {"name": "現在値", "value": f"**{current_price:,.1f}円**", "inline": True},
             {"name": "前日比", "value": f"**{diff:+.2f}%**", "inline": True},
-            {"name": "‎", "value": "‎", "inline": False}, # 改行用の空フィールド
-            {"name": "当日の最高値", "value": f"{high_price:,.1f}円", "inline": True},
-            {"name": "当日の最安値", "value": f"{low_price:,.1f}円", "inline": True},
-            {"name": "出来高", "value": f"{volume:,.0f} 株", "inline": True}
+            {"name": "🤖 AIミニ分析", "value": ai_comment, "inline": False} # AIのコメントを追加
         ],
         "footer": {"text": f"取得時刻: {latest.name.strftime('%Y-%m-%d %H:%M')}"}
     }
     return embed
 
 def main():
-    if not WEBHOOK_URL: return
+    if not WEBHOOK_URL or not GEMINI_KEY:
+        print("設定エラー: APIキーが足りません")
+        return
+    
     embeds = []
     for symbol in WATCH_LIST:
         print(f"{symbol} をチェック中...")
@@ -55,7 +67,7 @@ def main():
         if embed_data: embeds.append(embed_data)
     
     if embeds:
-        payload = {"content": "⚠️ **【プロ仕様】株価モメンタム監視報告**", "embeds": embeds}
+        payload = {"content": "⚠️ **【AI分析付】株価リアルタイム監視**", "embeds": embeds}
         requests.post(WEBHOOK_URL, json=payload)
 
 if __name__ == "__main__":
