@@ -1,0 +1,24 @@
+name: Daily Stock Check
+
+on:
+  schedule:
+    # 毎日 日本時間の午前9時5分に実行（世界標準時の0:05）
+    - cron: '5 0 * * 1-5' 
+  workflow_dispatch: # 手動で動かすボタンを表示させる設定
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3 # あなたのコードを読み込む
+      - name: Set up Python
+        uses: actions/setup-python@v4 # Pythonを準備する
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          pip install yfinance requests # 必要な道具をインストール
+      - name: Run script
+        env:
+          MY_DISCORD_URL: ${{ secrets.MY_DISCORD_URL }} # ステップ2で設定したURLを呼び出す
+        run: python stock.py # プログラムを実行！
