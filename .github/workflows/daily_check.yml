@@ -30,7 +30,7 @@ jobs:
     - name: Run Market Monitor Script
       env:
         MY_DISCORD_URL: ${{ secrets.MY_DISCORD_URL }}
-      run: python main.py # 実行ファイル名が main.py であると想定しています
+      run: python stock.py
 
     - name: Commit and Push History CSV
       run: |
