@@ -2,44 +2,39 @@ import os
 import yfinance as yf
 import requests
 import pandas as pd
+import random
 
 # --- 設定 ---
-# GitHub ActionsのSecretsに登録したURLを読み込みます
 WEBHOOK_URL = os.getenv("MY_DISCORD_URL")
 
-# 初心者向けの判断基準設定
-USD_BUY_THRESHOLD = 145.0  # 145円以下なら「買いチャンス」と教える
-RSI_PERIOD = 14            # RSIの計算期間（一般的に14日）
+# 判断基準
+USD_BUY_THRESHOLD = 145.0
+RSI_PERIOD = 14
 
-# --- 1. 教育用データベース（商品化の核となる部分） ---
-# 初心者が指標の意味を理解できるようにするための「教材辞書」です。
+# --- 1. 教育用データベース（商品化の核） ---
 KNOWLEDGE_BASE = {
     "MARKET": "🌍 **市場全体**: 個別株の動きは、まず市場全体の波に左右されます。波が良い時に買うのが基本です。",
-    "HG=F": "🏗️ **銅（材料）**: 『ドクター・コッパー』と呼ばれ、景気の先行指標です。半導体やEVに必須の材料。価格上昇は産業の活発化を意味します。",
-    "^SOX": "💻 **SOX指数**: 半導体企業の株価指数。材料（銅など）の価格と連動することが多く、ハイテク株の未来を占います。",
-    "RSI": "📊 **RSI**: 0-100で『買われすぎ(70以上)』『売られすぎ(30以下)』を示します。初心者は『安すぎる』時に注目しましょう。",
-    "FX": "💵 **為替**: 140円台など円高に振れると、米国株やドルの仕込み時になります。"
+    "HG=F": "🏗️ **銅（材料）**: 『ドクター・コッパー』と呼ばれ、景気の先行指標。AIサーバーやEVに必須の材料です。",
+    "^SOX": "💻 **SOX指数**: 半導体企業の株価指数。材料の価格と連動しやすく、ハイテク株の未来を占います。",
+    "RSI": "📊 **RSI**: 0-100で過熱感を示します。初心者は30以下の『安すぎる』時に注目しましょう。"
 }
 
+# 追加機能2: 材料工学ミニ講義（ランダムに表示）
+MATERIALS_LESSONS = [
+    "【材料知識】銅配線はアルミニウムより電気抵抗が低く、半導体の高速化に貢献しました。銅価格はハイテクのコストに直結します。",
+    "【材料知識】EV（電気自動車）はガソリン車の約3〜4倍の銅を使用します。脱炭素化は銅の需要を爆発させています。",
+    "【材料知識】半導体露光装置に使われるレンズやミラーの材料、実は日本の化学メーカーが世界トップシェアを握っていることが多いです。",
+    "【材料知識】次世代パワー半導体（SiCやGaN）は、省エネの鍵。これらを扱う企業の株価はエネルギー効率の需要と連動します。",
+    "【材料知識】金(Gold)は腐食しにくいため、スマホの基板の接点に使われます。有事の安全資産だけでなく、ハイテク材料の側面もあります。"
+]
+
 # --- 2. 監視ターゲット ---
-# 指数（市場全体）
-INDICES = {
-    "^N225": "日経平均",
-    "^GSPC": "S&P 500",
-    "^SOX": "SOX指数(半導体)"
-}
-# 材料・コモディティ
-COMMODITIES = {
-    "GC=F": "金 (Gold)",
-    "HG=F": "銅 (Copper)",
-    "TIO=F": "鉄鉱石 (Iron Ore)"
-}
-# 個別株
+INDICES = {"^N225": "日経平均", "^GSPC": "S&P 500", "^SOX": "SOX指数"}
+COMMODITIES = {"GC=F": "金 (Gold)", "HG=F": "銅 (Copper)"}
 STOCKS = ["NVDA", "MSFT", "6857.T", "6701.T", "7974.T"]
 FX_SYMBOL = "JPY=X"
 
 def calculate_rsi(ticker_symbol):
-    """テクニカル指標RSIを計算（投資判断の根拠となる数値）"""
     try:
         data = yf.download(ticker_symbol, period="1mo", interval="1d", progress=False)
         if data.empty: return None
@@ -49,11 +44,9 @@ def calculate_rsi(ticker_symbol):
         rs = gain / loss
         rsi = 100 - (100 / (1 + rs))
         return rsi.iloc[-1].item()
-    except:
-        return None
+    except: return None
 
 def get_data(symbol, name=None):
-    """株価・為替・材料データを取得"""
     try:
         ticker = yf.Ticker(symbol)
         data = ticker.history(period="2d")
@@ -62,72 +55,85 @@ def get_data(symbol, name=None):
         prev = data['Close'].iloc[-2]
         diff_pct = ((current - prev) / prev) * 100
         return {"name": name if name else symbol, "price": current, "pct": diff_pct}
-    except:
-        return None
+    except: return None
+
+# 追加機能1: 市場スコアリングロジック
+def calculate_market_score(fx, indices, commodities):
+    score = 50 # 基準点
+    # 為替: 円高ならプラス（米国株が安く買える）
+    if fx and fx['price'] <= USD_BUY_THRESHOLD: score += 15
+    # 指数: S&P500などが上昇していればプラス
+    for idx in indices:
+        if idx and idx['pct'] > 0: score += 5
+    # 銅: 上昇していれば景気良しとしてプラス
+    for com in commodities:
+        if "Copper" in com['name'] and com['pct'] > 0: score += 10
+    return min(max(score, 0), 100) # 0-100の間に収める
 
 def main():
-    if not WEBHOOK_URL:
-        print("Error: WEBHOOK_URL is not set.")
-        return
+    if not WEBHOOK_URL: return
 
     fields = []
     
-    # --- 3. セクション分けしたデータ構築 ---
+    # データ収集
+    fx = get_data(FX_SYMBOL, "ドル円")
+    index_results = [get_data(sym, label) for sym, label in INDICES.items()]
+    commodity_results = [get_data(sym, label) for sym, label in COMMODITIES.items()]
     
-    # セクション1: 為替（ドルの買い時教育）
-    fx = get_data(FX_SYMBOL, "ドル円 (USD/JPY)")
-    if fx:
-        is_chance = fx['price'] <= USD_BUY_THRESHOLD
-        status = "【🔥 買い時チャンス】" if is_chance else "【通常】"
-        lesson = f"\n└ *{KNOWLEDGE_BASE['FX']}*"
-        fields.append({
-            "name": f"💵 1. 為替状況 {status}",
-            "value": f"**1ドル = {fx['price']:.2f}円** ({fx['pct']:+.2f}%){lesson}",
-            "inline": False
-        })
+    # スコア計算
+    market_score = calculate_market_score(fx, index_results, commodity_results)
+    score_comment = "💎 絶好の仕込み時かも" if market_score >= 70 else ("⚖️ 慎重に見守りましょう" if market_score >= 40 else "⚠️ 今は様子見が賢明です")
 
-    # セクション2: 市場全体（指数）の要約
+    # セクション1: 本日の市場スコア
+    fields.append({
+        "name": f"📈 本日の投資チャンス指数： {market_score}点",
+        "value": f"**診断: {score_comment}**\n*※為替、銅価格、主要指数から算出した初心者向け指標です*",
+        "inline": False
+    })
+
+    # セクション2: 市場要約
     index_text = ""
-    for sym, label in INDICES.items():
-        res = get_data(sym, label)
+    for res in index_results:
         if res:
             mark = "📈" if res['pct'] > 0 else "📉"
             index_text += f"{mark} {res['name']}: **{res['price']:,.1f}** ({res['pct']:+.2f}%)\n"
-    if index_text:
-        index_text += f"*Advice: {KNOWLEDGE_BASE['MARKET']}*"
-        fields.append({"name": "🌍 2. 市場全体（指数）の要約", "value": index_text, "inline": False})
+    fields.append({"name": "🌍 市場全体（指数）", "value": index_text + f"└ *{KNOWLEDGE_BASE['MARKET']}*", "inline": False})
 
-    # セクション3: 材料工学視点の分析（商品化の強み）
+    # セクション3: 材料・資源
     commodity_text = ""
-    copper_surging = False
-    for sym, label in COMMODITIES.items():
-        res = get_data(sym, label)
+    for res in commodity_results:
         if res:
-            if "Copper" in label and res['pct'] > 0.3: copper_surging = True
             mark = "⚒️" if res['pct'] > 0 else "🧱"
             commodity_text += f"{mark} {res['name']}: **{res['price']:,.1f}** ({res['pct']:+.2f}%)\n"
-    
-    if commodity_text:
-        analysis = f"\n💡 **材料分析**: {KNOWLEDGE_BASE['HG=F']}"
-        if copper_surging:
-            analysis += "\n⚠️ **注目**: 銅価格が上昇中。半導体セクターに追い風の可能性があります。"
-        fields.append({"name": "🏗️ 3. 材料・資源価格と分析", "value": commodity_text + analysis, "inline": False})
+    fields.append({"name": "🏗️ 材料・資源分析", "value": commodity_text + f"└ *{KNOWLEDGE_BASE['HG=F']}*", "inline": False})
 
-    # セクション4: 個別株監視 + RSI教育
+    # セクション4: 個別株 + RSI
     for symbol in STOCKS:
         res = get_data(symbol)
         rsi = calculate_rsi(symbol)
         if res:
             mark = "🚀" if res['pct'] > 1.0 else ("📉" if res['pct'] < -1.0 else "➖")
-            rsi_info = f"RSI: {rsi:.1f}" if rsi else "RSI: --"
-            opportunity = " 💡買い場?" if rsi and rsi < 35 else (" ⚠️過熱気味" if rsi and rsi > 70 else "")
-            
+            rsi_val = f"{rsi:.1f}" if rsi else "--"
+            opp = " 💡買い場?" if rsi and rsi < 35 else ""
             fields.append({
                 "name": f"{mark} {res['name']}",
-                "value": f"**{res['price']:,.1f}** ({res['pct']:+.2f}%)\n`{rsi_info}`{opportunity}",
+                "value": f"**{res['price']:,.1f}** ({res['pct']:+.2f}%)\n`RSI: {rsi_val}`{opp}",
                 "inline": True
             })
 
-    # --- 4. Discord送信 ---
+    # Discord送信
+    lesson = random.choice(MATERIALS_LESSONS)
     payload = {
-        "content": "🎓 **投資
+        "content": f"🎓 **投資学習・監視レポート**\n{lesson}",
+        "embeds": [{
+            "title": "Kota's Materials Science & Invest Bot v4.0",
+            "description": f"*{KNOWLEDGE_BASE['RSI']}*",
+            "color": 0x3498db,
+            "fields": fields,
+            "footer": {"text": "理科大 材料工学専攻 | 投資教育プロダクト開発中"}
+        }]
+    }
+    requests.post(WEBHOOK_URL, json=payload)
+
+if __name__ == "__main__":
+    main()
