@@ -7,31 +7,32 @@ from datetime import datetime, timedelta
 
 # --- 設定 ---
 WEBHOOK_URL = os.getenv("MY_DISCORD_URL")
-HISTORY_FILE = "market_history.csv"  # 過去データを保存するファイル名
+HISTORY_FILE = "market_history.csv"
 
 # 判断基準
 USD_BUY_THRESHOLD = 145.0
 RSI_PERIOD = 14
-PREDICTION_DAYS = 7  # 何日前の予測を検証するか（1週間前）
+PREDICTION_DAYS = 7  # 1週間前の予測を検証
 
-# --- 1. 教育用データベース（商品化の核） ---
+# --- 1. 教育用データベース ---
 KNOWLEDGE_BASE = {
-    "MARKET": "🌍 **市場全体**: 個別株の動きは市場の波に左右されます。波が良い時に買うのが基本です。",
-    "HG=F": "🏗️ **銅（材料）**: 景気の先行指標。AIやEVに必須の材料です。価格上昇は産業の活発化を意味します。",
+    "MARKET": "🌍 **市場全体**: 個別株の動きは、まず市場全体の波に左右されます。波が良い時に買うのが基本です。",
+    "HG=F": "🏗️ **銅（材料）**: 『ドクター・コッパー』。半導体やEVに必須の材料で、価格上昇は景気回復のサインです。",
     "RSI": "📊 **RSI**: 30以下は『安すぎ』、70以上は『過熱』。初心者は安値を拾う目安にしましょう。",
-    "WIN_RATE": "🎯 **的中率**: 1週間前に『高スコア』だった際、実際に価格が上がった割合です。システムの信頼性を示します。"
+    "WIN_RATE": "🎯 **的中率**: 1週間前に『高スコア』だった際、実際に市場が上がった割合。システムの信頼性です。"
 }
 
 MATERIALS_LESSONS = [
     "【材料知識】銅配線は半導体の高速化に不可欠。銅価格はハイテク産業のコストに直結します。",
     "【材料知識】EVはガソリン車の3〜4倍の銅を使用。脱炭素化は銅需要を爆発させています。",
     "【材料知識】半導体材料のシリコンウエハー、実は日本企業（信越化学・SUMCO）が世界シェアの半分以上を占めています。",
-    "【材料知識】次世代半導体材料(SiC)は電力ロスを激減させます。テスラのEVにも採用され注目されました。"
+    "【材料知識】次世代半導体材料(SiC)は電力ロスを激減させます。材料の進化が投資テーマになります。"
 ]
 
-# --- 2. ターゲット ---
-INDICES = {"^GSPC": "S&P 500", "^SOX": "SOX指数"}
-STOCKS = ["NVDA", "6857.T"] # 検証用に主要銘柄に絞る
+# --- 2. 監視ターゲット（以前のリストを完全復元） ---
+INDICES = {"^N225": "日経平均", "^GSPC": "S&P 500", "^SOX": "SOX指数"}
+COMMODITIES = {"GC=F": "金 (Gold)", "HG=F": "銅 (Copper)"}
+STOCKS = ["NVDA", "MSFT", "6857.T", "6701.T", "7974.T"]
 FX_SYMBOL = "JPY=X"
 
 def calculate_rsi(symbol):
@@ -55,102 +56,81 @@ def get_data(symbol, name=None):
         return {"name": name if name else symbol, "price": current, "pct": ((current - prev) / prev) * 100}
     except: return None
 
-# --- 3. 実績保存と的中率計算（新機能） ---
+# --- 3. 実績保存と的中率計算 ---
 def update_performance(today_score, current_price):
     today_str = datetime.now().strftime('%Y-%m-%d')
     new_data = pd.DataFrame([[today_str, today_score, current_price]], columns=['Date', 'Score', 'Price'])
-    
     if os.path.exists(HISTORY_FILE):
         history_df = pd.read_csv(HISTORY_FILE)
         history_df = pd.concat([history_df, new_data], ignore_index=True).drop_duplicates('Date')
     else:
         history_df = new_data
-    
     history_df.to_csv(HISTORY_FILE, index=False)
     
-    # 的中率の計算
     try:
-        # 7日前のデータを探す
         target_date = (datetime.now() - timedelta(days=PREDICTION_DAYS)).strftime('%Y-%m-%d')
         past_records = history_df[history_df['Date'] <= target_date]
-        
-        if len(past_records) < 1:
-            return "データ蓄積中...", "まだ十分な過去データがありません。1週間後から表示されます。"
-
-        # スコア70以上の時に、その後価格が上がったか
+        if len(past_records) < 1: return "蓄積中...", "1週間後から表示されます。"
         buy_signals = history_df[history_df['Score'] >= 70]
         hits = 0
-        total_signals = 0
-        
+        total = 0
         for idx, row in buy_signals.iterrows():
-            # その日の価格と、それ以降の最新価格を比較
-            future_prices = history_df.iloc[idx + 1:]
-            if not future_prices.empty:
-                total_signals += 1
-                if future_prices.iloc[-1]['Price'] > row['Price']:
-                    hits += 1
-        
-        win_rate = (hits / total_signals * 100) if total_signals > 0 else 0
-        return f"{win_rate:.1f}%", f"過去 {total_signals} 回の買い推奨中、{hits} 回価格が上昇しました。"
-    except:
-        return "計算中...", "データの分析中です。"
+            future = history_df.iloc[idx + 1:]
+            if not future.empty:
+                total += 1
+                if future.iloc[-1]['Price'] > row['Price']: hits += 1
+        return f"{(hits/total*100):.1f}%" if total > 0 else "0.0%", f"過去{total}回の買い推奨中、{hits}回的中。"
+    except: return "分析中...", "データ収集中。"
 
-def calculate_market_score(fx, index_results):
+def calculate_market_score(fx, idx_res, com_res):
     score = 50
-    if fx and fx['price'] <= USD_BUY_THRESHOLD: score += 20
-    for res in index_results:
-        if res and res['pct'] > 0: score += 10
+    if fx and fx['price'] <= USD_BUY_THRESHOLD: score += 15
+    for r in idx_res: 
+        if r and r['pct'] > 0: score += 5
+    for r in com_res:
+        if r and "Copper" in r['name'] and r['pct'] > 0: score += 10
     return min(max(score, 0), 100)
 
 def main():
     if not WEBHOOK_URL: return
-
     # データ収集
     fx = get_data(FX_SYMBOL, "ドル円")
-    idx_res = [get_data(sym, label) for sym, label in INDICES.items()]
+    idx_res = [get_data(s, l) for s, l in INDICES.items()]
+    com_res = [get_data(s, l) for s, l in COMMODITIES.items()]
     
-    # スコアと的中率の計算
-    m_score = calculate_market_score(fx, idx_res)
-    # 代表としてS&P500(idx_res[0])の価格で検証
-    current_market_price = idx_res[0]['price'] if idx_res[0] else 0
-    win_rate, win_comment = update_performance(m_score, current_market_price)
+    # 的中率・スコア計算
+    m_score = calculate_market_score(fx, idx_res, com_res)
+    win_rate, win_msg = update_performance(m_score, idx_res[1]['price'] if idx_res[1] else 0) # S&P500で検証
 
     fields = []
-    # 的中率セクション
-    fields.append({
-        "name": f"🎯 システム的中率: {win_rate}",
-        "value": f"{win_comment}\n*Advice: {KNOWLEDGE_BASE['WIN_RATE']}*",
-        "inline": False
-    })
-
+    # 的中率
+    fields.append({"name": f"🎯 的中率: {win_rate}", "value": f"{win_msg}\n└ *{KNOWLEDGE_BASE['WIN_RATE']}*", "inline": False})
+    
     # 市場スコア
-    status_emoji = "💎" if m_score >= 70 else ("⚖️" if m_score >= 40 else "⚠️")
-    fields.append({
-        "name": f"{status_emoji} 本日の市場スコア: {m_score}点",
-        "value": f"**判定: {'買い推奨' if m_score >= 70 else '様子見'}**",
-        "inline": True
-    })
+    emoji = "💎" if m_score >= 70 else ("⚖️" if m_score >= 40 else "⚠️")
+    fields.append({"name": f"{emoji} 投資チャンス指数: {m_score}点", "value": f"**判定: {'買い推奨' if m_score >= 70 else '様子見'}**", "inline": False})
 
-    # 指数と個別株（簡略化して表示）
-    stock_text = ""
-    for symbol in STOCKS:
-        res = get_data(symbol)
-        rsi = calculate_rsi(symbol)
-        if res:
-            stock_text += f"🔹 {res['name']}: {res['price']:,.0f} ({res['pct']:+.2f}%) RSI:{rsi:.1f}\n"
-    fields.append({"name": "📈 注目銘柄の動き", "value": stock_text, "inline": False})
+    # 指数（v4.0形式の復元）
+    idx_txt = "".join([f"{'📈' if r['pct']>0 else '📉'} {r['name']}: {r['price']:,.1f} ({r['pct']:+.2f}%)\n" for r in idx_res if r])
+    fields.append({"name": "🌍 市場全体（指数）", "value": f"{idx_txt}└ *{KNOWLEDGE_BASE['MARKET']}*", "inline": False})
 
-    # Discord送信
+    # 材料（v4.0形式の復元）
+    com_txt = "".join([f"{'⚒️' if r['pct']>0 else '🧱'} {r['name']}: {r['price']:,.1f} ({r['pct']:+.2f}%)\n" for r in com_res if r])
+    fields.append({"name": "🏗️ 材料・資源分析", "value": f"{com_txt}└ *{KNOWLEDGE_BASE['HG=F']}*", "inline": False})
+
+    # 個別株
+    for s in STOCKS:
+        r = get_data(s); rsi = calculate_rsi(s)
+        if r:
+            mark = "🚀" if r['pct'] > 1.0 else ("📉" if r['pct'] < -1.0 else "➖")
+            opp = " 💡買い場?" if rsi and rsi < 35 else ""
+            fields.append({"name": f"{mark} {r['name']}", "value": f"**{r['price']:,.1f}** ({r['pct']:+.2f}%)\n`RSI:{rsi:.1f}`{opp}", "inline": True})
+
+    # 送信
     lesson = random.choice(MATERIALS_LESSONS)
-    payload = {
-        "content": f"🎓 **投資実績・監視レポート**\n{lesson}",
-        "embeds": [{
-            "title": "Kota's Invest System v5.0",
-            "color": 0xe74c3c if m_score < 40 else 0x2ecc71,
-            "fields": fields,
-            "footer": {"text": "理科大 材料工学専攻 | 実績に基づく投資教育を目指して"}
-        }]
-    }
+    payload = {"content": f"🎓 **投資教育・監視レポート**\n{lesson}",
+               "embeds": [{"title": "Kota's Invest System v5.1", "description": f"*{KNOWLEDGE_BASE['RSI']}*",
+                           "color": 0x3498db, "fields": fields, "footer": {"text": "理科大 材料工学専攻 | 商品化プロトタイプ開発中"}}]}
     requests.post(WEBHOOK_URL, json=payload)
 
 if __name__ == "__main__":
