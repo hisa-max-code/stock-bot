@@ -2,15 +2,16 @@ import os
 import yfinance as yf
 import requests
 
-# --- 設定の読み込み ---
+# --- 1. 設定：ここを好きな数字に変えてください ---
 WEBHOOK_URL = os.getenv("MY_DISCORD_URL")
+USD_BUY_THRESHOLD = 145.0  # 145円以下になったら「買いチャンス」と通知
 
-# 監視する銘柄と為替
+# 監視銘柄
 STOCKS = ["NVDA", "MSFT", "6857.T", "6701.T", "7974.T"]
-FX_SYMBOL = "JPY=X" # ドル円のシンボル
+FX_SYMBOL = "JPY=X"
 
 def get_fx_data():
-    """ドル円の現在値と前日比を取得する"""
+    """ドル円のデータを取得し、チャンス判定を行う"""
     try:
         ticker = yf.Ticker(FX_SYMBOL)
         data = ticker.history(period="2d")
@@ -20,7 +21,11 @@ def get_fx_data():
         prev_rate = data['Close'].iloc[-2]
         diff = current_rate - prev_rate
         diff_pct = (diff / prev_rate) * 100
-        return current_rate, diff, diff_pct
+        
+        # ドル買いチャンス判定
+        is_chance = current_rate <= USD_BUY_THRESHOLD
+        
+        return current_rate, diff_pct, is_chance
     except:
         return None
 
@@ -36,7 +41,6 @@ def check_stock(symbol):
         current_price = latest['Close']
         diff_pct = ((current_price - prev_close) / prev_close) * 100
         
-        # 変動が0.1%未満なら通知しない
         if abs(diff_pct) < 0.1: return None
 
         color = 3066993 if diff_pct > 0 else 15158332
@@ -51,41 +55,41 @@ def check_stock(symbol):
         return None
 
 def main():
-    if not WEBHOOK_URL:
-        print("設定エラー: DiscordのURLがありません")
-        return
+    if not WEBHOOK_URL: return
 
-    # 為替データの取得
+    # 1. 為替チェック
     fx_info = get_fx_data()
     embed_fields = []
+    alert_msg = ""
     
     if fx_info:
-        rate, diff, pct = fx_info
-        fx_mark = "円安" if diff > 0 else "円高"
+        rate, pct, is_chance = fx_info
+        status = "【🔥 ドル買いチャンス！】" if is_chance else "【通常】"
+        if is_chance:
+            alert_msg = f"📢 **久田さん、1ドル {rate:.2f}円 です！ドル転の検討タイミングです。**"
+        
         embed_fields.append({
-            "name": f"💵 現在の為替 (USD/JPY)",
-            "value": f"**1ドル = {rate:.2f}円** ({pct:+.2f}% / {fx_mark})",
+            "name": f"💵 為替状況 {status}",
+            "value": f"**1ドル = {rate:.2f}円** ({pct:+.2f}%)",
             "inline": False
         })
 
-    # 株価データの取得
+    # 2. 株価チェック
     for symbol in STOCKS:
         field = check_stock(symbol)
-        if field:
-            embed_fields.append(field)
+        if field: embed_fields.append(field)
 
     if embed_fields:
         payload = {
-            "content": "📊 **本日の市場モニタリング**",
+            "content": f"📊 **市場モニタリング報告**\n{alert_msg}",
             "embeds": [{
-                "title": "為替・株価 リアルタイム報告",
-                "color": 3447003,
+                "title": "為替・株価 リアルタイム監視",
+                "color": 15105570 if alert_msg else 3447003, # チャンス時はオレンジ色に
                 "fields": embed_fields,
-                "footer": {"text": "yfinanceデータ使用"}
+                "footer": {"text": f"判定しきい値: {USD_BUY_THRESHOLD}円"}
             }]
         }
         requests.post(WEBHOOK_URL, json=payload)
-        print("通知を送信しました。")
 
 if __name__ == "__main__":
     main()
